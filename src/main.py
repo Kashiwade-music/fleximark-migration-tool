@@ -54,6 +54,10 @@ MESSAGES = {
         "ja": "リソースを移動中: {}\n               -> {}",
         "en": "Moving resource: {}\n              -> {}",
     },
+    "rename_vscode_conf_dir": {
+        "ja": ".vscodeディレクトリをバックアップしています: {}",
+        "en": "Backing up .vscode directory: {}",
+    },
 }
 
 
@@ -169,6 +173,17 @@ def main():
 
     console.print(f"[blue]{get_message('backup_start', lang)}[/blue]")
     backup_workspace(workspace_path, lang)
+
+    # if .vscode exists, rename it to .vscode_backup
+    vscode_path = workspace_path / ".vscode"
+    if vscode_path.exists() and vscode_path.is_dir():
+        backup_vscode_path = workspace_path / ".vscode_backup"
+        if backup_vscode_path.exists():
+            shutil.rmtree(backup_vscode_path)
+        shutil.move(vscode_path, backup_vscode_path)
+        console.print(
+            f"[yellow]{get_message('rename_vscode_conf_dir', lang, vscode_path)}[/yellow]"
+        )
 
     console.print(f"[blue]{get_message('processing_start', lang)}[/blue]")
     process_workspace(workspace_path, lang)
