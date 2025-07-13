@@ -1,0 +1,9 @@
+[project]
+name = "fleximark-migration-tool"
+version = "0.1.0"
+description = "Migration Tool from 'VSCode Note Taking Extension' to 'FlexiMark'"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "rich>=14.0.0",
+]
