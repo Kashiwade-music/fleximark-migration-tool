@@ -11,8 +11,57 @@ from rich.prompt import Prompt
 
 console = Console()
 
+MESSAGES = {
+    "choose_language": {
+        "ja": "言語を選択してください（ja または en）",
+        "en": "Please select a language (ja or en)",
+    },
+    "enter_path": {
+        "ja": "VSCode Note Taking Extensionワークスペースの絶対パスを入力してください",
+        "en": "Enter the absolute path to your VSCode Note Taking Extension workspace",
+    },
+    "no_input": {"ja": "パスが入力されていません。", "en": "No path was entered."},
+    "file_not_directory": {
+        "ja": "指定されたパスはファイルです。ディレクトリを指定してください。",
+        "en": "The specified path is a file. Please provide a directory.",
+    },
+    "path_not_exist": {
+        "ja": "指定されたパスが存在しません: {}",
+        "en": "The specified path does not exist: {}",
+    },
+    "not_absolute_path": {
+        "ja": "絶対パスを指定してください。",
+        "en": "Please provide an absolute path.",
+    },
+    "not_directory": {
+        "ja": "指定されたパスが存在しないか、ディレクトリではありません: {}",
+        "en": "The specified path does not exist or is not a directory: {}",
+    },
+    "backup_start": {"ja": "バックアップ中...", "en": "Backing up..."},
+    "backup_done": {"ja": "バックアップ完了: {}", "en": "Backup completed: {}"},
+    "processing_start": {
+        "ja": "リンク修正およびリソースの再配置を開始します...",
+        "en": "Starting link rewriting and resource relocation...",
+    },
+    "markdown_count": {
+        "ja": "Markdownファイル数: {}",
+        "en": "Number of Markdown files: {}",
+    },
+    "updating": {"ja": "更新: {}", "en": "Updated: {}"},
+    "done": {"ja": "すべての処理が完了しました。", "en": "All processing is complete."},
+    "processing_links": {"ja": "リンク書き換え処理中...", "en": "Rewriting links..."},
+    "moving_resource": {
+        "ja": "リソースを移動中: {}\n               -> {}",
+        "en": "Moving resource: {}\n              -> {}",
+    },
+}
 
-def backup_workspace(workspace_path: Path) -> Path:
+
+def get_message(key: str, lang: str, *args):
+    return MESSAGES[key][lang].format(*args)
+
+
+def backup_workspace(workspace_path: Path, lang: str) -> Path:
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     backup_filename = f"{timestamp}-backup.zip"
     backup_path = Path.cwd() / backup_filename
@@ -24,39 +73,39 @@ def backup_workspace(workspace_path: Path) -> Path:
                 arcname = filepath.relative_to(workspace_path)
                 zipf.write(filepath, arcname)
 
-    console.print(f"[green]バックアップ完了: {backup_path}[/green]")
+    console.print(f"[green]{get_message('backup_done', lang, backup_path)}[/green]")
     return backup_path
 
 
-def find_and_rewrite_links(md_path: Path, workspace_path: Path, attachments_root: Path):
+def find_and_rewrite_links(
+    md_path: Path, workspace_path: Path, attachments_root: Path, lang: str
+):
     content = md_path.read_text(encoding="utf-8")
     modified = False
 
-    # Markdown画像リンク等を検出: ![](path) や [](path)
     pattern = re.compile(r"(!?\[.*?\])\(([^)]+)\)")
 
     def replace_link(match: re.Match[str]) -> str:
         nonlocal modified
-        full_match, label, rel_path = match.group(0), match.group(1), match.group(2)
+        label, rel_path = match.group(1), match.group(2)
 
-        # 無視するケース
         if rel_path.startswith("http://") or rel_path.startswith("https://"):
-            return full_match
+            return match.group(0)
 
         source_path = (md_path.parent / rel_path).resolve()
         if not source_path.exists() or not source_path.is_file():
-            return full_match
+            return match.group(0)
 
-        relative_md_path = md_path.relative_to(workspace_path).with_suffix(
-            ""
-        )  # ./path/to/markdown
+        relative_md_path = md_path.relative_to(workspace_path).with_suffix("")
         new_attachment_dir = attachments_root / relative_md_path
         new_attachment_dir.mkdir(parents=True, exist_ok=True)
 
         destination_path = new_attachment_dir / source_path.name
         if not destination_path.exists():
             shutil.copy2(source_path, destination_path)
-            # delete the original file if it exists
+            console.print(
+                f"[white]{get_message('moving_resource', lang, source_path, destination_path)}[/white]"
+            )
             if source_path.exists():
                 source_path.unlink()
 
@@ -70,61 +119,60 @@ def find_and_rewrite_links(md_path: Path, workspace_path: Path, attachments_root
 
     if modified:
         md_path.write_text(new_content, encoding="utf-8")
-        console.print(f"[cyan]更新: {md_path}[/cyan]")
+        console.print(f"[cyan]{get_message('updating', lang, md_path)}[/cyan]")
 
 
-def process_workspace(workspace_path: Path):
+def process_workspace(workspace_path: Path, lang: str):
     attachments_root = workspace_path / "attachments"
     md_files = list(workspace_path.rglob("*.md"))
 
-    console.print(f"[bold]Markdownファイル数: {len(md_files)}[/bold]")
+    console.print(f"[bold]{get_message('markdown_count', lang, len(md_files))}[/bold]")
     for md_file in track(
-        md_files, description="リンク書き換え処理中...", console=console
+        md_files, description=get_message("processing_links", lang), console=console
     ):
-        find_and_rewrite_links(md_file, workspace_path, attachments_root)
+        find_and_rewrite_links(md_file, workspace_path, attachments_root, lang)
 
 
 def main():
-    user_input = Prompt.ask(
-        "VSCode Note Taking Extensionのワークスペースパスを絶対パスで入力してください"
-    )
+    lang = Prompt.ask(get_message("choose_language", "en")).lower()
+    if lang not in ("ja", "en"):
+        lang = "en"
 
-    # クォートの除去
+    user_input = Prompt.ask(get_message("enter_path", lang))
+
     if user_input:
         user_input = user_input.strip().strip('"').strip("'")
 
     if not user_input:
-        console.print("[red]パスが入力されていません。[/red]")
+        console.print(f"[red]{get_message('no_input', lang)}[/red]")
         return
 
     if os.path.isfile(user_input):
-        console.print(
-            "[red]指定されたパスはファイルです。ディレクトリを指定してください。[/red]"
-        )
+        console.print(f"[red]{get_message('file_not_directory', lang)}[/red]")
         return
 
     if not os.path.exists(user_input):
-        console.print(f"[red]指定されたパスが存在しません: {user_input}[/red]")
+        console.print(f"[red]{get_message('path_not_exist', lang, user_input)}[/red]")
         return
 
     workspace_path = Path(user_input).resolve()
 
     if not workspace_path.is_absolute():
-        console.print("[red]絶対パスを指定してください。[/red]")
+        console.print(f"[red]{get_message('not_absolute_path', lang)}[/red]")
         return
 
     if not workspace_path.exists() or not workspace_path.is_dir():
         console.print(
-            f"[red]指定されたパスが存在しないか、ディレクトリではありません: {workspace_path}[/red]"
+            f"[red]{get_message('not_directory', lang, workspace_path)}[/red]"
         )
         return
 
-    console.print("[blue]バックアップ中...[/blue]")
-    backup_workspace(workspace_path)
+    console.print(f"[blue]{get_message('backup_start', lang)}[/blue]")
+    backup_workspace(workspace_path, lang)
 
-    console.print("[blue]リンク修正およびリソースの再配置を開始します...[/blue]")
-    process_workspace(workspace_path)
-    console.print("[green bold]すべての処理が完了しました。[/green bold]")
+    console.print(f"[blue]{get_message('processing_start', lang)}[/blue]")
+    process_workspace(workspace_path, lang)
+    console.print(f"[green bold]{get_message('done', lang)}[/green bold]")
 
 
 if __name__ == "__main__":
